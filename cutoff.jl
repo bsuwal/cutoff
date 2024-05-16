@@ -1,15 +1,62 @@
-""" cutoff
+""" Library for cutoff experiments
 """
 
-function tvd(μ, ϕ)
-    """ Computes the total variation distance between the two probability dists
-        μ and ϕ.
+""" Activation functions
+"""
+function σ(x::Real)
+    """ The ReLu activation function.
     """
-    @assert length(μ) == length(ϕ)
+    if x > 0
+        return x
+    else
+        return 0
+    end
+end
+
+function σ²(x::Real)
+    """ The ReQu activation function.
+    """
+    if x > 0
+        return x^2
+    else
+        return 0
+    end
+end
+
+""" Cutoff functions
+"""
+
+function tvd(μ::Array, ϕ::Array)
+    """ Computes the total variation distance between the distributions μ and ϕ.
+    """
+    @assert size(μ) == size(ϕ)
     total_diff = 0
 
-    for i = 1:length(μ)
+    for i in eachindex(μ)
         total_diff += abs(μ[i] - ϕ[i])
+    end
+
+    total_diff/2
+end
+
+function tvd(μ::Dict, ϕ::Dict)
+    """ Computes the total variation distance between the distributions μ and ϕ, where
+        μ and ϕ are dictionarys.
+    """
+    total_diff = 0
+
+    intersection = intersect(keys(μ), keys(ϕ))
+
+    for key in intersection
+        total_diff += abs(μ[key] - ϕ[key])
+    end
+
+    for key in setdiff(keys(μ), keys(ϕ))
+        total_diff += abs(μ[key])
+    end
+
+    for key in setdiff(keys(ϕ), keys(μ))
+        total_diff += abs(ϕ[key])
     end
 
     total_diff/2
@@ -18,7 +65,7 @@ end
 function num_balls_distribution(num_balls, urn_counts)
     """ Returns the distribution of the number of balls present in the urn
         corresponding to ``urn_counts". The i'th index of the returned array ``dist"
-        contains the number of times the urn had i balls in it. 
+        contains the number of times the urn had i balls in it.
     """
     c = counter(urn_counts)
     denom = sum(values(c))
@@ -75,41 +122,128 @@ function get_destination(src, lazy, n)
     dst
 end
 
+function normalize_dictionary(d)
+    """ Normalizes the dictionary using L1 norm.
+        Important: The function assumes that the values of ``d" are non-negative.
+    """
+    denom = sum(values(d))
+    normalized = Dict()
+
+    for (key, value) in d
+        normalized[key] = value/denom
+    end
+
+    normalized
+end
+
+function get_interval(point, step_size)
+    """ Gets the interval that point is in on a hypergrid of size ``step_size".
+    """
+    intervals = []
+    for coord in point
+        interval = get_coordinate_interval(coord, step_size)
+        push!(intervals, interval)
+    end
+    Tuple(intervals)
+end
+
+function get_coordinate_interval(val, step_size)
+    """ Returns interval that ``val" is in on a hypergrid of size ``step_size".
+        Note: 0 is centered on [-step_size/2, step_size/2].
+    """
+    if val >= 0
+        left = round(step_size/2 + floor((val - step_size/2)/step_size) * step_size, digits = 3)
+        right = round(left + step_size, digits=3)
+    else
+        right = round(-step_size/2 + ceil((val + step_size/2)/step_size) * step_size, digits = 3)
+        left = round(right - step_size, digits=3)
+    end
+
+    left, right
+end
+
+function take_step(Xᵢ, Dist, activation, N)
+    """ Takes a random step using the a linear map generated from ``Dist"
+        and returns the step.
+    """
+    Wᵢ = rand(Dist, N, N)
+    Xᵢ₊₁= activation.(Wᵢ * Xᵢ)
+    Xᵢ₊₁
+end
+
+function update_dist!(μ::Dict, X, step_size)
+    """ Adds 1 to the observation of state ``X" to the distribution
+        μ (which is a dictionary).
+    """
+    interval = get_interval(X, step_size)
+
+    if interval in keys(μ)
+        μ[interval] += 1
+    else
+        μ[interval] = 1
+    end
+end
+
+function get_tvds(X₀, Dist, activation, num_steps, N, step_size)
+    """ Returns an Array of total variation distances between the distribution
+        of X₀ and the point mass at 0.
+    """
+    Xᵢ = X₀
+    μ = Dict()
+    tvds = []
+
+    zero_coords = get_interval(zeros(N), step_size)
+    ϕ = Dict()
+    ϕ[zero_coords] = 1
+
+    for i=1:num_steps
+        Xᵢ₊₁ = take_step(Xᵢ, Dist, activation, N)
+        update_dist!(μ, Xᵢ₊₁, step_size)
+
+        μ_normalized = normalize_dictionary(μ)
+
+        push!(tvds, tvd(μ_normalized, ϕ))
+        Xᵢ = Xᵢ₊₁
+    end
+    tvds
+end
+
 """
 TODO: The functions below are wrong!
 """
-function ehrnfest(num_urns)
-    """ Returns the transition matrix of the ehrnfest model on ``num_urns" urns.
-    """
-    P = zeros(num_urns, num_urns)
-    n = num_urns - 1
-
-    for i = 0:n
-        for j = 0:n
-            if j == i+1
-                P[i+1, j+1] = (n-i)/n
-            elseif j == i - 1
-                P[i+1, j+1] = i/n
-            end
-        end
-    end
-    P
-end
-
-function lazy_ehrenfest(num_urns)
-    """ Returns the transition matrix for the lazy ehrenfest model.
-    """
-    P = zeros(num_urns, num_urns)
-    n = num_urns - 1
-
-    for i = 0:n
-        for j = 0:n
-            if j == i-1
-                P[i+1, j+1] = i/(n+1)
-            elseif j == i
-                P[i+1, j+1] = (n - i)/(n+1)
-            end
-        end
-    end
-    P
-end
+nothing
+# function ehrnfest(num_urns)
+#     """ Returns the transition matrix of the ehrnfest model on ``num_urns" urns.
+#     """
+#     P = zeros(num_urns, num_urns)
+#     n = num_urns - 1
+#
+#     for i = 0:n
+#         for j = 0:n
+#             if j == i+1
+#                 P[i+1, j+1] = (n-i)/n
+#             elseif j == i - 1
+#                 P[i+1, j+1] = i/n
+#             end
+#         end
+#     end
+#     P
+# end
+#
+# function lazy_ehrenfest(num_urns)
+#     """ Returns the transition matrix for the lazy ehrenfest model.
+#     """
+#     P = zeros(num_urns, num_urns)
+#     n = num_urns - 1
+#
+#     for i = 0:n
+#         for j = 0:n
+#             if j == i-1
+#                 P[i+1, j+1] = i/(n+1)
+#             elseif j == i
+#                 P[i+1, j+1] = (n - i)/(n+1)
+#             end
+#         end
+#     end
+#     P
+# end
