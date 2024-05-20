@@ -122,7 +122,7 @@ function get_destination(src, lazy, n)
     dst
 end
 
-function normalize_dictionary(d)
+function normalize_dictionary(d::Dict)
     """ Normalizes the dictionary using L1 norm.
         Important: The function assumes that the values of ``d" are non-negative.
     """
@@ -135,6 +135,20 @@ function normalize_dictionary(d)
 
     normalized
 end
+
+# function normalize_dictionary(ds::Array{Dict})
+#     """ Normalizes the dictionary using L1 norm.
+#         Important: The function assumes that the values of ``d" are non-negative.
+#     """
+#     normalized_dicts = []
+#
+#     for i = 1:length(ds)
+#         normalized = normalize_dictionary(ds[i])
+#         push!(normalized_dicts, normalized)
+#     end
+#
+#     normalized_dicts
+# end
 
 function get_interval(point, step_size)
     """ Gets the interval that point is in on a hypergrid of size ``step_size".
@@ -162,7 +176,7 @@ function get_coordinate_interval(val, step_size)
     left, right
 end
 
-function take_step(Xᵢ, Dist, activation, N)
+function take_step(Xᵢ, Dist, activation::Function, N::Int)
     """ Takes a random step using the a linear map generated from ``Dist"
         and returns the step.
     """
@@ -171,7 +185,19 @@ function take_step(Xᵢ, Dist, activation, N)
     Xᵢ₊₁
 end
 
-function update_dist!(μ::Dict, X, step_size)
+# function take_step(X::Array{Vector{Float64}}, Dist, activation::Function, N::Int)
+#     """ Takes a random step using the a linear map generated from ``Dist"
+#         and returns the step.
+#     """
+#     X_arr = []
+#     for i = 1:length(X)
+#         Xᵢ₊₁ = take_step(X[i], Distm activation, N)
+#         push!(X_arr, Xᵢ₊₁)
+#     end
+#     X_arr
+# end
+
+function update_dist!(μ::Dict, X, step_size::Float64)
     """ Adds 1 to the observation of state ``X" to the distribution
         μ (which is a dictionary).
     """
@@ -183,6 +209,15 @@ function update_dist!(μ::Dict, X, step_size)
         μ[interval] = 1
     end
 end
+
+# function update_dist!(μs::Array{Dict}, X, step_size::Float)
+#     """ Adds 1 to the observation of state ``X" to the distribution
+#         μ (which is a dictionary).
+#     """
+#     for i = 1:length(X)
+#         update_dist!(μ, X[i], step_size)
+#     end
+# end
 
 function get_tvds(X₀, Dist, activation, num_steps, N, step_size)
     """ Returns an Array of total variation distances between the distribution
@@ -207,6 +242,36 @@ function get_tvds(X₀, Dist, activation, num_steps, N, step_size)
     end
     tvds
 end
+
+# function get_tvds(X₀, Dist, activation, num_steps, N, step_size, num_chains::Integer)
+#     """ Returns an Array of total variation distances between the distribution
+#         of X₀ and the point mass at 0.
+#     """
+#     X = []
+#     Xᵢ = X₀
+#     μs = Array{Dict}(undef, num_chains)
+#     for i = 1:num_chains
+#         μs[i] = Dict()
+#         push!(X, X₀)
+#     end
+#     tvds = []
+#
+#     zero_coords = get_interval(zeros(N), step_size)
+#     ϕ = Dict()
+#     ϕ[zero_coords] = 1
+#
+#     for i = 1:num_steps
+#         Xᵢ₊₁ = take_step(Xᵢ, Dist, activation, N)
+#         update_dist!(μs, Xᵢ₊₁, step_size)
+#
+#         μ_normalized = normalize_dictionary(μs)
+#
+#         push!(tvds, tvd(μ_normalized, ϕ))
+#         Xᵢ = Xᵢ₊₁
+#     end
+#     tvds
+# end
+
 
 """
 TODO: The functions below are wrong!
