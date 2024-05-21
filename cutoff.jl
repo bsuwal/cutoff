@@ -13,31 +13,8 @@ function σ(x::Real)
     end
 end
 
-function σ²(x::Real)
-    """ The ReQu activation function.
-    """
-    if x > 0
-        return x^2
-    else
-        return 0
-    end
-end
-
-""" Cutoff functions
+""" Distance functions
 """
-
-function tvd(μ::Array, ϕ::Array)
-    """ Computes the total variation distance between the distributions μ and ϕ.
-    """
-    @assert size(μ) == size(ϕ)
-    total_diff = 0
-
-    for i in eachindex(μ)
-        total_diff += abs(μ[i] - ϕ[i])
-    end
-
-    total_diff/2
-end
 
 function tvd(μ::Dict, ϕ::Dict)
     """ Computes the total variation distance between the distributions μ and ϕ, where
@@ -62,96 +39,20 @@ function tvd(μ::Dict, ϕ::Dict)
     total_diff/2
 end
 
-function num_balls_distribution(num_balls, urn_counts)
-    """ Returns the distribution of the number of balls present in the urn
-        corresponding to ``urn_counts". The i'th index of the returned array ``dist"
-        contains the number of times the urn had i balls in it.
-    """
-    c = counter(urn_counts)
-    denom = sum(values(c))
+""" Functions to compute the intervals in the hypergrid.
+"""
 
-    dist = zeros(num_balls)
-    for i=1:num_balls
-        if i in keys(c)
-            dist[i] = c[i] / denom
-        end
-    end
-    dist
-end
-
-function run_chain(balls, num_steps, lazy=false, urn=1)
-    """ Returns an array that holds the counts of the number of balls in
-        urn ``urn".
-    """
-    num_urns = 2
-    num_balls = sum(balls)
-    @assert urn <= num_urns
-
-    urn_counts = [] # holds the number of balls in urn ``urn"
-
-    for i = 1:num_steps
-        # pick source of ball to move
-        src = StatsBase.sample(1:num_urns, ProbabilityWeights(balls))
-
-        dst = get_destination(src, lazy, num_balls)
-
-        balls[src] -= 1
-        balls[dst] += 1
-
-        push!(urn_counts, balls[urn])
-    end
-    urn_counts
-end
-
-function get_destination(src, lazy, n)
-    """ Returns the destination of the ball for a step in the ehrenfest chain.
-        For the simple model, the destination is the other urn w.p 1.
-        For the lazy model, there is a (1/(n+1)) probability that the ball
-        remains in the same urn.
-    """
-    if src == 1
-        dst = 2
-    elseif src == 2
-        dst = 1
-    end
-
-    if lazy && rand() < (1/(n+1))
-        dst = src
-    end
-
-    dst
-end
-
-function normalize_dictionary(d::Dict)
-    """ Normalizes the dictionary using L1 norm.
+function normalize!(d::Dict, denom)
+    """ Normalizes ``d" with the denominator ``denom".
         Important: The function assumes that the values of ``d" are non-negative.
     """
-    denom = sum(values(d))
-    normalized = Dict()
-
     for (key, value) in d
-        normalized[key] = value/denom
+        d[key] = value/denom
     end
-
-    normalized
 end
 
-# function normalize_dictionary(ds::Array{Dict})
-#     """ Normalizes the dictionary using L1 norm.
-#         Important: The function assumes that the values of ``d" are non-negative.
-#     """
-#     normalized_dicts = []
-#
-#     for i = 1:length(ds)
-#         normalized = normalize_dictionary(ds[i])
-#         push!(normalized_dicts, normalized)
-#     end
-#
-#     normalized_dicts
-# end
-
 function get_interval(point, step_size)
-    """ Gets the interval that point is in on a hypergrid of size ``step_size".
+    """ Gets the interval that ``point" is in on a hypergrid of size ``step_size".
     """
     intervals = []
     for coord in point
@@ -161,41 +62,49 @@ function get_interval(point, step_size)
     Tuple(intervals)
 end
 
-function get_coordinate_interval(val, step_size)
+function get_coordinate_interval(val, step_size, digits = 4)
     """ Returns interval that ``val" is in on a hypergrid of size ``step_size".
-        Note: 0 is centered on [-step_size/2, step_size/2].
+        Note: 0 is centered on [-step_size/2, step_size/2]. The rounding business in this
+              function is to allow for this centering.
     """
+    @assert step_size >= 0.001 "smallest step_size allowed is 0.001 (change the `digits' param to allow for smaller step sizes.)"
+
     if val >= 0
-        left = round(step_size/2 + floor((val - step_size/2)/step_size) * step_size, digits = 3)
-        right = round(left + step_size, digits=3)
+        left = round(step_size/2 + floor((val - step_size/2)/step_size) * step_size, digits = digits)
+        right = round(left + step_size, digits = digits)
     else
-        right = round(-step_size/2 + ceil((val + step_size/2)/step_size) * step_size, digits = 3)
-        left = round(right - step_size, digits=3)
+        right = round(-step_size/2 + ceil((val + step_size/2)/step_size) * step_size, digits = digits)
+        left = round(right - step_size, digits = digits)
     end
 
     left, right
 end
 
-function take_step(Xᵢ, Dist, activation::Function, N::Int)
-    """ Takes a random step using the a linear map generated from ``Dist"
-        and returns the step.
-    """
-    Wᵢ = rand(Dist, N, N)
-    Xᵢ₊₁= activation.(Wᵢ * Xᵢ)
-    Xᵢ₊₁
-end
+""" Markov Chain Functions
+"""
 
-# function take_step(X::Array{Vector{Float64}}, Dist, activation::Function, N::Int)
-#     """ Takes a random step using the a linear map generated from ``Dist"
-#         and returns the step.
-#     """
-#     X_arr = []
-#     for i = 1:length(X)
-#         Xᵢ₊₁ = take_step(X[i], Distm activation, N)
-#         push!(X_arr, Xᵢ₊₁)
-#     end
-#     X_arr
-# end
+function take_step!(X::Array, Dist, activation::Function, N::Int, num_chains::Int, step_size::Float64)
+    """ Takes a random step using the a linear map generated from ``Dist" for each
+        Xᵢ in X. Returns the probability distribution of Xᵢ at this step on a hypergrid
+        of granularity ``step_size".
+
+        Note: This function overwrites the array ``X" at each step, in true Markov
+        Chain fashion, and forgets the previous steps. Similarly, we do not currently
+        keep track of the μ distribtions of previous steps.
+    """
+    μ = Dict()
+    for i=1:num_chains
+        # take a step for the i'th chain
+        Wᵢ = rand(Dist, N, N)
+        X[i] = activation.(Wᵢ * X[i])
+
+        # update the distribution of Xᵢs observed at this time step
+        update_dist!(μ, X[i], step_size)
+    end
+
+    normalize!(μ, num_chains)
+    μ
+end
 
 function update_dist!(μ::Dict, X, step_size::Float64)
     """ Adds 1 to the observation of state ``X" to the distribution
@@ -210,105 +119,29 @@ function update_dist!(μ::Dict, X, step_size::Float64)
     end
 end
 
-# function update_dist!(μs::Array{Dict}, X, step_size::Float)
-#     """ Adds 1 to the observation of state ``X" to the distribution
-#         μ (which is a dictionary).
-#     """
-#     for i = 1:length(X)
-#         update_dist!(μ, X[i], step_size)
-#     end
-# end
-
-function get_tvds(X₀, Dist, activation, num_steps, N, step_size)
+function mc_tvds(X₀, Dist, activation, num_steps, N, step_size, num_chains::Integer)
     """ Returns an Array of total variation distances between the distribution
         of X₀ and the point mass at 0.
     """
-    Xᵢ = X₀
-    μ = Dict()
+
+    # Initialize parameters
     tvds = []
+
+    # the first step for every chain is the same.
+    X = []
+    Xᵢ = X₀
+    for i = 1:num_chains
+        push!(X, X₀)
+    end
 
     zero_coords = get_interval(zeros(N), step_size)
     ϕ = Dict()
     ϕ[zero_coords] = 1
 
-    for i=1:num_steps
-        Xᵢ₊₁ = take_step(Xᵢ, Dist, activation, N)
-        update_dist!(μ, Xᵢ₊₁, step_size)
-
-        μ_normalized = normalize_dictionary(μ)
-
-        push!(tvds, tvd(μ_normalized, ϕ))
-        Xᵢ = Xᵢ₊₁
+    # Run chain
+    for i = 1:num_steps
+        μ = take_step!(X, Dist, activation, N, num_chains, step_size)
+        push!(tvds, tvd(μ, ϕ))
     end
     tvds
 end
-
-# function get_tvds(X₀, Dist, activation, num_steps, N, step_size, num_chains::Integer)
-#     """ Returns an Array of total variation distances between the distribution
-#         of X₀ and the point mass at 0.
-#     """
-#     X = []
-#     Xᵢ = X₀
-#     μs = Array{Dict}(undef, num_chains)
-#     for i = 1:num_chains
-#         μs[i] = Dict()
-#         push!(X, X₀)
-#     end
-#     tvds = []
-#
-#     zero_coords = get_interval(zeros(N), step_size)
-#     ϕ = Dict()
-#     ϕ[zero_coords] = 1
-#
-#     for i = 1:num_steps
-#         Xᵢ₊₁ = take_step(Xᵢ, Dist, activation, N)
-#         update_dist!(μs, Xᵢ₊₁, step_size)
-#
-#         μ_normalized = normalize_dictionary(μs)
-#
-#         push!(tvds, tvd(μ_normalized, ϕ))
-#         Xᵢ = Xᵢ₊₁
-#     end
-#     tvds
-# end
-
-
-"""
-TODO: The functions below are wrong!
-"""
-nothing
-# function ehrnfest(num_urns)
-#     """ Returns the transition matrix of the ehrnfest model on ``num_urns" urns.
-#     """
-#     P = zeros(num_urns, num_urns)
-#     n = num_urns - 1
-#
-#     for i = 0:n
-#         for j = 0:n
-#             if j == i+1
-#                 P[i+1, j+1] = (n-i)/n
-#             elseif j == i - 1
-#                 P[i+1, j+1] = i/n
-#             end
-#         end
-#     end
-#     P
-# end
-#
-# function lazy_ehrenfest(num_urns)
-#     """ Returns the transition matrix for the lazy ehrenfest model.
-#     """
-#     P = zeros(num_urns, num_urns)
-#     n = num_urns - 1
-#
-#     for i = 0:n
-#         for j = 0:n
-#             if j == i-1
-#                 P[i+1, j+1] = i/(n+1)
-#             elseif j == i
-#                 P[i+1, j+1] = (n - i)/(n+1)
-#             end
-#         end
-#     end
-#     P
-# end
