@@ -1,6 +1,22 @@
 """ Library for cutoff experiments
 """
 
+
+
+""" Experiment Struct that has all the information for an experiment
+"""
+@with_kw struct Experiment
+    X₀::Array{Float64, 1}
+    N::Int
+    num_chains::Int
+    Dist::Distribution
+    activation::Function
+    step_size::Float64
+    num_steps::Int
+end
+
+
+
 """ Activation functions
 """
 function σ(x::Real)
@@ -83,7 +99,8 @@ end
 """ Markov Chain Functions
 """
 
-function take_step!(X::Array, Dist, activation::Function, N::Int, num_chains::Int, step_size::Float64)
+function take_step!(X::Array, Dist, activation::Function, N::Int, num_chains::Int,
+    step_size::Float64, store_steps::Bool=false)
     """ Takes a random step using the a linear map generated from ``Dist" for each
         Xᵢ in X. Returns the probability distribution of Xᵢ at this step on a hypergrid
         of granularity ``step_size".
@@ -93,17 +110,29 @@ function take_step!(X::Array, Dist, activation::Function, N::Int, num_chains::In
         keep track of the μ distribtions of previous steps.
     """
     μ = Dict()
+    steps = []
+
     for i=1:num_chains
         # take a step for the i'th chain
         Wᵢ = rand(Dist, N, N)
-        X[i] = activation.(Wᵢ * X[i])
+        step = activation.(Wᵢ * X[i])
+
+        X[i] = step
+        if store_steps
+            push!(steps, step)
+        end
 
         # update the distribution of Xᵢs observed at this time step
         update_dist!(μ, X[i], step_size)
     end
 
     normalize!(μ, num_chains)
-    μ
+
+    if store_steps
+        return μ, steps
+    else
+        return μ
+    end
 end
 
 function update_dist!(μ::Dict, X, step_size::Float64)
@@ -119,11 +148,12 @@ function update_dist!(μ::Dict, X, step_size::Float64)
     end
 end
 
-function mc_tvds(X₀, Dist, activation, num_steps, N, step_size, num_chains::Integer)
+function mc_tvds(Exp; verbose::Bool=false, store_steps::Bool=false)
+    # exp = Experiment(X₀, N, num_chains, Dist, activation, step_size, num_steps)
     """ Returns an Array of total variation distances between the distribution
         of X₀ and the point mass at 0.
     """
-
+    @unpack_Experiment Exp
     # Initialize parameters
     tvds = []
 
@@ -134,14 +164,122 @@ function mc_tvds(X₀, Dist, activation, num_steps, N, step_size, num_chains::In
         push!(X, X₀)
     end
 
-    zero_coords = get_interval(zeros(N), step_size)
+    zero_coords = get_interval(zeros(N), Exp.step_size)
     ϕ = Dict()
     ϕ[zero_coords] = 1
+    all_steps = []
 
     # Run chain
     for i = 1:num_steps
-        μ = take_step!(X, Dist, activation, N, num_chains, step_size)
-        push!(tvds, tvd(μ, ϕ))
+        if verbose
+            println("Taking Step $i of $num_steps steps")
+        end
+        if store_steps
+            μ, steps = take_step!(X, Dist, activation, N, num_chains, step_size, true)
+            push!(all_steps, steps)
+            push!(tvds, tvd(μ, ϕ))
+        else
+            μ = take_step!(X, Dist, activation, N, num_chains, step_size)
+            push!(tvds, tvd(μ, ϕ))
+        end
+
     end
-    tvds
+    if store_steps
+        return tvds, all_steps
+    else
+        return tvds
+    end
+end
+
+""" Plotting Functions
+"""
+
+function get_plotting_strs(Exp::Experiment)
+    diststr = ""
+    actstr = ""
+
+    if typeof(Exp.Dist) == Normal{Float64}
+        μ = Exp.Dist.μ
+        std = Exp.Dist.σ
+
+        if std == 1/√Exp.N
+            std = "1/√N"
+        end
+        diststr = "Gaussian($μ, $std)"
+    elseif typeof(Exp.Dist) == Uniform{Float64}
+        a = Exp.Dist.a
+        b = Exp.Dist.b
+
+        if a == -1/√Exp.N
+            a = "-1/√N"
+        end
+        if b == 1/√Exp.N
+            b = "1/√N"
+        end
+        diststr = "Uniform($a, $b)"
+    end
+
+    if Exp.activation == σ
+        actstr = "ReLu"
+    elseif Exp.activation == tanh
+        actstr = "TanH"
+    end
+
+    return diststr, actstr
+end
+
+function run_and_plot_tvd_experiment(Exp::Experiment; verbose=false, save=false)
+    """
+    """
+    @unpack_Experiment Exp
+
+    tvds = mc_tvds(Exp, verbose=verbose)
+    diststr, actstr = get_plotting_strs(Exp)
+
+    p = plot()
+    plot!(tvds,
+         title="$diststr, $actstr, N=$N, $num_chains chains",
+         xlabel="# layers",
+         ylabel="tvd",
+         xlim=(0, num_steps),
+         ylim=(-0.2, 1.2),
+         yticks = 0:0.2:1.2,
+         seriestype=:scatter
+    )
+    if save
+        savefig(p, "$diststr $actstr N=$N.png")
+    else
+        display(p)
+    end
+end
+
+function plot_single_coordinate_over_time(Exp::Experiment, all_steps, coord)
+    """
+    """
+    @unpack_Experiment Exp
+
+    # plotting setup
+    xs = []
+    ys = []
+    for step in eachindex(all_steps)
+        for chain in all_steps[step]
+            push!(xs, step)
+            push!(ys, chain[coord])
+        end
+    end
+
+    diststr, actstr = get_plotting_strs(Exp)
+
+    # the plotting
+    println()
+    println("X₀ : $X₀")
+    plot(xs, ys,
+        title="$diststr, $actstr, N=$N, $num_chains chains",
+        xlabel="# layers",
+        ylabel="Xᵢ",
+        seriestype=:scatter,
+        xlim=(0, num_steps),
+        ylim=(-1.2, 1.2),
+        yticks = -1.2:0.2:1.2,
+    )
 end
