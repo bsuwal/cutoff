@@ -20,9 +20,14 @@ using LinearAlgebra
     step_size::Float64
     num_steps::Int
     forward::Bool
+    store_steps::Bool
 end
 
-
+mutable struct ExperimentResults
+    tvds::Array
+    weights::Array
+    steps::Array
+end
 
 """ Activation functions
 """
@@ -103,11 +108,23 @@ function get_coordinate_interval(val, step_size, digits = 4)
     left, right
 end
 
+function update_dist!(μ::Dict, X, step_size::Float64)
+    """ Adds 1 to the observation of state ``X" to the distribution
+        μ (which is a dictionary).
+    """
+    interval = get_interval(X, step_size)
+
+    if interval in keys(μ)
+        μ[interval] += 1
+    else
+        μ[interval] = 1
+    end
+end
+
 """ Markov Chain Functions
 """
 
-function take_step!(X, Dist, activation::Function, N::Int, num_chains::Int,
-    step_size::Float64, all_weights, all_steps; store_steps::Bool=false)
+function take_forward_step!(Exp::Experiment, Results::ExperimentResults, X, ϕ)
     """ Takes a random step using the a linear map generated from ``Dist" for each
         Xᵢ in X. Returns the probability distribution of Xᵢ at this step on a hypergrid
         of granularity ``step_size".
@@ -116,6 +133,8 @@ function take_step!(X, Dist, activation::Function, N::Int, num_chains::Int,
         Chain fashion, and forgets the previous steps. Similarly, we do not currently
         keep track of the μ distribtions of previous steps.
     """
+    @unpack_Experiment Exp
+
     μ = Dict()
     weights = []
     steps = []
@@ -135,41 +154,44 @@ function take_step!(X, Dist, activation::Function, N::Int, num_chains::Int,
         update_dist!(μ, X[i], step_size)
     end
 
-    if store_steps
-        push!(all_weights, weights)
-        push!(all_steps, steps)
-    end
-
+    # update Results
     normalize!(μ, num_chains)
-    μ
+    push!(Results.tvds, tvd(μ, ϕ))
+    if store_steps
+        push!(Results.weights, weights)
+        push!(Results.steps, steps)
+    end
 end
 
-function sample_weights!(Dist, N::Int, num_chains::Int, all_weights::Array)
+function sample_weights!(Exp::Experiment, Results::ExperimentResults)
     """
     """
+    @unpack_Experiment Exp
     weights = []
 
     for i=1:num_chains
-        # take a step for the i'th chain
         Wᵢ = rand(Dist, N, N)
         push!(weights, Wᵢ)
     end
 
-    push!(all_weights, weights)
+    push!(Results.weights, weights)
 end
 
-function take_reverse_step!(X₀, all_weights::Array, all_steps::Array, num_chains::Int, activation)
+function take_reverse_step!(Exp::Experiment, Results::ExperimentResults)
     """
     """
+    @unpack_Experiment Exp
     steps = []
+
     for i = 1:num_chains
         step = X₀
-        for j = length(all_weights):-1:1
-            step = activation.(all_weights[j][i] * step)
+        for j = length(Results.weights):-1:1
+            step = activation.(Results.weights[j][i] * step)
         end
         push!(steps, step)
     end
-    push!(all_steps, steps)
+
+    push!(Results.steps, steps)
 end
 
 function get_distribution_at_step(X::Array, num_chains, step_size)
@@ -185,78 +207,57 @@ function get_distribution_at_step(X::Array, num_chains, step_size)
     μ
 end
 
-function take_reverse_step!(X₀::Array, Dist, activation::Function, N::Int, num_chains::Int,
-    step_size::Float64, all_weights::Array, all_steps::Array)
-    """ Takes a random step using the a linear map generated from ``Dist" for each
-        Xᵢ in X. Returns the probability distribution of Xᵢ at this step on a hypergrid
-        of granularity ``step_size".
-
-        Note: This function overwrites the array ``X" at each step, in true Markov
-        Chain fashion, and forgets the previous steps. Similarly, we do not currently
-        keep track of the μ distribtions of previous steps.
+function take_reverse_step!(Exp::Experiment, Results::ExperimentResults, ϕ)
     """
-    sample_weights!(Dist, N, num_chains, all_weights)
-    take_reverse_step!(X₀, all_weights, all_steps, num_chains, activation)
-
-    X = last(all_steps)
-    μ = get_distribution_at_step(X, num_chains, step_size)
-    μ
-end
-
-
-function update_dist!(μ::Dict, X, step_size::Float64)
-    """ Adds 1 to the observation of state ``X" to the distribution
-        μ (which is a dictionary).
-    """
-    interval = get_interval(X, step_size)
-
-    if interval in keys(μ)
-        μ[interval] += 1
-    else
-        μ[interval] = 1
-    end
-end
-
-function mc_tvds(Exp::Experiment; verbose::Bool=false, store_steps::Bool=false)
-    # exp = Experiment(X₀, N, num_chains, Dist, activation, step_size, num_steps)
-    """ Returns an Array of total variation distances between the distribution
-        of X₀ and the point mass at 0.
     """
     @unpack_Experiment Exp
-    # Initialize parameters
-    tvds = []
+
+    sample_weights!(Exp, Results)
+    take_reverse_step!(Exp, Results)
+
+    X = last(Results.steps)
+    μ = get_distribution_at_step(X, num_chains, step_size)
+    push!(Results.tvds, tvd(μ, ϕ))
+end
+
+function initialize_chain_variables(Exp::Experiment)
+    """
+    """
+    @unpack_Experiment Exp
 
     # the first step for every chain is the same.
     X = []
     Xᵢ = X₀
-    for i = 1:num_chains
+    for i = 1:Exp.num_chains
         push!(X, X₀)
     end
 
     zero_coords = get_interval(zeros(N), step_size)
     ϕ = Dict()
     ϕ[zero_coords] = 1
-    all_weights = []
-    all_steps = []
+
+    X, ϕ
+end
+
+
+function run_chain(Exp::Experiment, Results::ExperimentResults; verbose::Bool=false)
+    # exp = Experiment(X₀, N, num_chains, Dist, activation, step_size, num_steps)
+    """ Returns an Array of total variation distances between the distribution
+        of X₀ and the point mass at 0.
+    """
+    X, ϕ = initialize_chain_variables(Exp)
 
     # Run chain
-    for i = 1:num_steps
+    for i = 1:Exp.num_steps
         if verbose
             println("Taking Step $i of $num_steps steps")
         end
 
         if forward
-            μ = take_step!(X, Dist, activation, N, num_chains, step_size, all_weights, all_steps, store_steps=true)
+            take_forward_step!(Exp, Results, X, ϕ)
         else
-            μ = take_reverse_step!(X₀, Dist, activation, N, num_chains, step_size, all_weights, all_steps)
+            take_reverse_step!(Exp, Results, ϕ)
         end
-        push!(tvds, tvd(μ, ϕ))
-    end
-
-    if store_steps
-        return tvds, all_weights, all_steps
-    else
-        return tvds
     end
 end
 
@@ -266,7 +267,7 @@ function time_to_convergence_to_zero(Exp::Experiment, num_paths)
     num_exceeds = 0
 
     for i=1:num_paths
-        tvds = mc_tvds(Exp, verbose=false, store_steps=false)
+        tvds = run_chain(Exp, verbose=false)
         time = findfirst(==(0), tvds)
         if isnothing(time)
             num_exceeds += 1
@@ -318,16 +319,16 @@ function get_plotting_strs(Exp::Experiment)
     return diststr, actstr
 end
 
-function run_and_plot_tvd_experiment(Exp::Experiment; verbose=false, save=false)
+function run_and_plot_tvds(Exp::Experiment, Results::ExperimentResults; verbose=false, save=false)
     """
     """
     @unpack_Experiment Exp
 
-    tvds = mc_tvds(Exp, verbose=verbose)
+    run_chain(Exp, Results, verbose=verbose)
     diststr, actstr = get_plotting_strs(Exp)
 
     p = plot()
-    plot!(tvds,
+    plot!(Results.tvds,
          title="$diststr, $actstr, N=$N, $num_chains chains",
          xlabel="# layers",
          ylabel="tvd",
