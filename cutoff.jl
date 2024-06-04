@@ -19,6 +19,7 @@ using LinearAlgebra
     activation::Function
     step_size::Float64
     num_steps::Int
+    forward::Bool
 end
 
 
@@ -105,46 +106,8 @@ end
 """ Markov Chain Functions
 """
 
-function take_step!(X::Array, Dist, activation::Function, N::Int, num_chains::Int,
-    step_size::Float64, store_steps::Bool=false)
-    """ Takes a random step using the a linear map generated from ``Dist" for each
-        Xᵢ in X. Returns the probability distribution of Xᵢ at this step on a hypergrid
-        of granularity ``step_size".
-
-        Note: This function overwrites the array ``X" at each step, in true Markov
-        Chain fashion, and forgets the previous steps. Similarly, we do not currently
-        keep track of the μ distribtions of previous steps.
-    """
-    μ = Dict()
-    weights = []
-    steps = []
-
-    for i=1:num_chains
-        # take a step for the i'th chain
-        Wᵢ = rand(Dist, N, N)
-        step = activation.(Wᵢ * X[i])
-
-        X[i] = step
-        if store_steps
-            push!(weights, Wᵢ)
-            push!(steps, step)
-        end
-
-        # update the distribution of Xᵢs observed at this time step
-        update_dist!(μ, X[i], step_size)
-    end
-
-    normalize!(μ, num_chains)
-
-    if store_steps
-        return μ, weights, steps
-    else
-        return μ
-    end
-end
-
-function take_step!(X::Array, Dist, activation::Function, N::Int, num_chains::Int,
-    step_size::Float64, store_steps::Bool=false, all_weights::Array, all_steps::Array)
+function take_step!(X, Dist, activation::Function, N::Int, num_chains::Int,
+    step_size::Float64, all_weights, all_steps; store_steps::Bool=false)
     """ Takes a random step using the a linear map generated from ``Dist" for each
         Xᵢ in X. Returns the probability distribution of Xᵢ at this step on a hypergrid
         of granularity ``step_size".
@@ -181,6 +144,66 @@ function take_step!(X::Array, Dist, activation::Function, N::Int, num_chains::In
     μ
 end
 
+function sample_weights!(Dist, N::Int, num_chains::Int, all_weights::Array)
+    """
+    """
+    weights = []
+
+    for i=1:num_chains
+        # take a step for the i'th chain
+        Wᵢ = rand(Dist, N, N)
+        push!(weights, Wᵢ)
+    end
+
+    push!(all_weights, weights)
+end
+
+function take_reverse_step!(X₀, all_weights::Array, all_steps::Array, num_chains::Int, activation)
+    """
+    """
+    steps = []
+    for i = 1:num_chains
+        step = X₀
+        for j = length(all_weights):-1:1
+            step = activation.(all_weights[j][i] * step)
+        end
+        push!(steps, step)
+    end
+    push!(all_steps, steps)
+end
+
+function get_distribution_at_step(X::Array, num_chains, step_size)
+    """
+    """
+    μ = Dict()
+
+    for i=1:num_chains
+        update_dist!(μ, X[i], step_size)
+    end
+
+    normalize!(μ, num_chains)
+    μ
+end
+
+function take_reverse_step!(X₀::Array, Dist, activation::Function, N::Int, num_chains::Int,
+    step_size::Float64, all_weights::Array, all_steps::Array)
+    """ Takes a random step using the a linear map generated from ``Dist" for each
+        Xᵢ in X. Returns the probability distribution of Xᵢ at this step on a hypergrid
+        of granularity ``step_size".
+
+        Note: This function overwrites the array ``X" at each step, in true Markov
+        Chain fashion, and forgets the previous steps. Similarly, we do not currently
+        keep track of the μ distribtions of previous steps.
+    """
+    sample_weights!(Dist, N, num_chains, all_weights)
+    take_reverse_step!(X₀, all_weights, all_steps, num_chains, activation)
+
+    X = last(all_steps)
+    μ = get_distribution_at_step(X, num_chains, step_size)
+    μ
+end
+
+
 function update_dist!(μ::Dict, X, step_size::Float64)
     """ Adds 1 to the observation of state ``X" to the distribution
         μ (which is a dictionary).
@@ -210,7 +233,7 @@ function mc_tvds(Exp::Experiment; verbose::Bool=false, store_steps::Bool=false)
         push!(X, X₀)
     end
 
-    zero_coords = get_interval(zeros(N), Exp.step_size)
+    zero_coords = get_interval(zeros(N), step_size)
     ϕ = Dict()
     ϕ[zero_coords] = 1
     all_weights = []
@@ -221,15 +244,15 @@ function mc_tvds(Exp::Experiment; verbose::Bool=false, store_steps::Bool=false)
         if verbose
             println("Taking Step $i of $num_steps steps")
         end
-        if store_steps
-            μ, weights, steps = take_step!(X, Dist, activation, N, num_chains, step_size, true, all_weights, all_steps)
-            push!(tvds, tvd(μ, ϕ))
-        else
-            μ = take_step!(X, Dist, activation, N, num_chains, step_size)
-            push!(tvds, tvd(μ, ϕ))
-        end
 
+        if forward
+            μ = take_step!(X, Dist, activation, N, num_chains, step_size, all_weights, all_steps, store_steps=true)
+        else
+            μ = take_reverse_step!(X₀, Dist, activation, N, num_chains, step_size, all_weights, all_steps)
+        end
+        push!(tvds, tvd(μ, ϕ))
     end
+
     if store_steps
         return tvds, all_weights, all_steps
     else
