@@ -1,9 +1,15 @@
 """ Library for cutoff experiments
 """
 
-
+using StatsBase
+using DataStructures
+using Plots
+using Distributions
+using Parameters
+using LinearAlgebra
 
 """ Experiment Struct that has all the information for an experiment
+    Note: using the @with_kw macro lets us use the @unpack macro.
 """
 @with_kw struct Experiment
     X₀::Array{Float64, 1}
@@ -110,6 +116,7 @@ function take_step!(X::Array, Dist, activation::Function, N::Int, num_chains::In
         keep track of the μ distribtions of previous steps.
     """
     μ = Dict()
+    weights = []
     steps = []
 
     for i=1:num_chains
@@ -119,6 +126,7 @@ function take_step!(X::Array, Dist, activation::Function, N::Int, num_chains::In
 
         X[i] = step
         if store_steps
+            push!(weights, Wᵢ)
             push!(steps, step)
         end
 
@@ -129,10 +137,48 @@ function take_step!(X::Array, Dist, activation::Function, N::Int, num_chains::In
     normalize!(μ, num_chains)
 
     if store_steps
-        return μ, steps
+        return μ, weights, steps
     else
         return μ
     end
+end
+
+function take_step!(X::Array, Dist, activation::Function, N::Int, num_chains::Int,
+    step_size::Float64, store_steps::Bool=false, all_weights::Array, all_steps::Array)
+    """ Takes a random step using the a linear map generated from ``Dist" for each
+        Xᵢ in X. Returns the probability distribution of Xᵢ at this step on a hypergrid
+        of granularity ``step_size".
+
+        Note: This function overwrites the array ``X" at each step, in true Markov
+        Chain fashion, and forgets the previous steps. Similarly, we do not currently
+        keep track of the μ distribtions of previous steps.
+    """
+    μ = Dict()
+    weights = []
+    steps = []
+
+    for i=1:num_chains
+        # take a step for the i'th chain
+        Wᵢ = rand(Dist, N, N)
+        step = activation.(Wᵢ * X[i])
+
+        X[i] = step
+        if store_steps
+            push!(weights, Wᵢ)
+            push!(steps, step)
+        end
+
+        # update the distribution of Xᵢs observed at this time step
+        update_dist!(μ, X[i], step_size)
+    end
+
+    if store_steps
+        push!(all_weights, weights)
+        push!(all_steps, steps)
+    end
+
+    normalize!(μ, num_chains)
+    μ
 end
 
 function update_dist!(μ::Dict, X, step_size::Float64)
@@ -148,7 +194,7 @@ function update_dist!(μ::Dict, X, step_size::Float64)
     end
 end
 
-function mc_tvds(Exp; verbose::Bool=false, store_steps::Bool=false)
+function mc_tvds(Exp::Experiment; verbose::Bool=false, store_steps::Bool=false)
     # exp = Experiment(X₀, N, num_chains, Dist, activation, step_size, num_steps)
     """ Returns an Array of total variation distances between the distribution
         of X₀ and the point mass at 0.
@@ -167,6 +213,7 @@ function mc_tvds(Exp; verbose::Bool=false, store_steps::Bool=false)
     zero_coords = get_interval(zeros(N), Exp.step_size)
     ϕ = Dict()
     ϕ[zero_coords] = 1
+    all_weights = []
     all_steps = []
 
     # Run chain
@@ -175,8 +222,7 @@ function mc_tvds(Exp; verbose::Bool=false, store_steps::Bool=false)
             println("Taking Step $i of $num_steps steps")
         end
         if store_steps
-            μ, steps = take_step!(X, Dist, activation, N, num_chains, step_size, true)
-            push!(all_steps, steps)
+            μ, weights, steps = take_step!(X, Dist, activation, N, num_chains, step_size, true, all_weights, all_steps)
             push!(tvds, tvd(μ, ϕ))
         else
             μ = take_step!(X, Dist, activation, N, num_chains, step_size)
@@ -185,11 +231,32 @@ function mc_tvds(Exp; verbose::Bool=false, store_steps::Bool=false)
 
     end
     if store_steps
-        return tvds, all_steps
+        return tvds, all_weights, all_steps
     else
         return tvds
     end
 end
+
+function time_to_convergence_to_zero(Exp::Experiment, num_paths)
+    @assert Exp.num_chains == 1
+    times = []
+    num_exceeds = 0
+
+    for i=1:num_paths
+        tvds = mc_tvds(Exp, verbose=false, store_steps=false)
+        time = findfirst(==(0), tvds)
+        if isnothing(time)
+            num_exceeds += 1
+        else
+            push!(times, time)
+        end
+    end
+
+    num_steps = Exp.num_steps
+    println("$num_exceeds/$num_paths paths did not converge to 0 within $num_steps steps.")
+    times
+end
+
 
 """ Plotting Functions
 """
