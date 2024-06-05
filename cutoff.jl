@@ -12,7 +12,7 @@ using LinearAlgebra
     Note: using the @with_kw macro lets us use the @unpack macro.
 """
 @with_kw struct Experiment
-    X₀::Array{Float64, 1}
+    X₀::Vector{Float64}
     N::Int
     num_chains::Int
     Dist::Distribution
@@ -24,9 +24,15 @@ using LinearAlgebra
 end
 
 mutable struct ExperimentResults
-    tvds::Array
-    weights::Array
-    steps::Array
+    tvds::Vector{Float64}
+    weights::Array{Array{Matrix{Float64}}}
+    steps::Array{Array{Array{Float64}}}
+end
+
+struct Interval
+    left::Float64
+    right::Float64
+    Interval(left, right) = left > right ? error("Left element is greater than Right element.") : new(left, right)
 end
 
 """ Activation functions
@@ -44,7 +50,7 @@ end
 """ Distance functions
 """
 
-function tvd(μ::Dict, ϕ::Dict)
+function tvd(μ::Dict, ϕ::Dict)::Float64
     """ Computes the total variation distance between the distributions μ and ϕ, where
         μ and ϕ are dictionarys.
     """
@@ -82,7 +88,7 @@ end
 function get_interval(point, step_size)
     """ Gets the interval that ``point" is in on a hypergrid of size ``step_size".
     """
-    intervals = []
+    intervals = Array{Interval, 1}()
     for coord in point
         interval = get_coordinate_interval(coord, step_size)
         push!(intervals, interval)
@@ -90,7 +96,7 @@ function get_interval(point, step_size)
     Tuple(intervals)
 end
 
-function get_coordinate_interval(val, step_size, digits = 4)
+function get_coordinate_interval(val, step_size, digits = 4)::Interval
     """ Returns interval that ``val" is in on a hypergrid of size ``step_size".
         Note: 0 is centered on [-step_size/2, step_size/2]. The rounding business in this
               function is to allow for this centering.
@@ -105,7 +111,7 @@ function get_coordinate_interval(val, step_size, digits = 4)
         left = round(right - step_size, digits = digits)
     end
 
-    left, right
+    Interval(left, right)
 end
 
 function update_dist!(μ::Dict, X, step_size::Float64)
@@ -135,9 +141,9 @@ function take_forward_step!(Exp::Experiment, Results::ExperimentResults, X, ϕ)
     """
     @unpack_Experiment Exp
 
-    μ = Dict()
-    weights = []
-    steps = []
+    μ = Dict{NTuple{N, Interval}, Float64}()
+    weights = Array{Matrix{Float64}, 1}()
+    steps = Array{Array{Float64}, 1}()
 
     for i=1:num_chains
         # take a step for the i'th chain
@@ -145,6 +151,7 @@ function take_forward_step!(Exp::Experiment, Results::ExperimentResults, X, ϕ)
         step = activation.(Wᵢ * X[i])
 
         X[i] = step
+
         if store_steps
             push!(weights, Wᵢ)
             push!(steps, step)
@@ -153,7 +160,6 @@ function take_forward_step!(Exp::Experiment, Results::ExperimentResults, X, ϕ)
         # update the distribution of Xᵢs observed at this time step
         update_dist!(μ, X[i], step_size)
     end
-
     # update Results
     normalize!(μ, num_chains)
     push!(Results.tvds, tvd(μ, ϕ))
@@ -167,7 +173,7 @@ function sample_weights!(Exp::Experiment, Results::ExperimentResults)
     """
     """
     @unpack_Experiment Exp
-    weights = []
+    weights = Array{Matrix{Float64}, 1}()
 
     for i=1:num_chains
         Wᵢ = rand(Dist, N, N)
@@ -181,7 +187,7 @@ function take_reverse_step!(Exp::Experiment, Results::ExperimentResults)
     """
     """
     @unpack_Experiment Exp
-    steps = []
+    steps = Array{Array{Float64}, 1}()
 
     for i = 1:num_chains
         step = X₀
@@ -194,10 +200,10 @@ function take_reverse_step!(Exp::Experiment, Results::ExperimentResults)
     push!(Results.steps, steps)
 end
 
-function get_distribution_at_step(X::Array, num_chains, step_size)
+function get_distribution_at_step(X::Array, N::Int, num_chains::Int, step_size::Float64)
     """
     """
-    μ = Dict()
+    μ = Dict{NTuple{N, Interval}, Float64}()
 
     for i=1:num_chains
         update_dist!(μ, X[i], step_size)
@@ -216,7 +222,7 @@ function take_reverse_step!(Exp::Experiment, Results::ExperimentResults, ϕ)
     take_reverse_step!(Exp, Results)
 
     X = last(Results.steps)
-    μ = get_distribution_at_step(X, num_chains, step_size)
+    μ = get_distribution_at_step(X, N, num_chains, step_size)
     push!(Results.tvds, tvd(μ, ϕ))
 end
 
@@ -226,14 +232,14 @@ function initialize_chain_variables(Exp::Experiment)
     @unpack_Experiment Exp
 
     # the first step for every chain is the same.
-    X = []
+    X = Array{Vector{Float64}, 1}()
     Xᵢ = X₀
     for i = 1:Exp.num_chains
         push!(X, X₀)
     end
 
     zero_coords = get_interval(zeros(N), step_size)
-    ϕ = Dict()
+    ϕ = Dict{NTuple{N, Interval}, Float64}()
     ϕ[zero_coords] = 1
 
     X, ϕ
@@ -246,6 +252,8 @@ function run_chain(Exp::Experiment, Results::ExperimentResults; verbose::Bool=fa
         of X₀ and the point mass at 0.
     """
     X, ϕ = initialize_chain_variables(Exp)
+    # make sure that this is the start of a new experiment
+    @assert isempty(Results.weights)
 
     # Run chain
     for i = 1:Exp.num_steps
