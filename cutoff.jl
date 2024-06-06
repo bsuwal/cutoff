@@ -268,16 +268,31 @@ function run_chain(Exp::Experiment, Results::ExperimentResults; verbose::Bool=fa
     end
 end
 
-function time_to_convergence_to_zero(Exp::Experiment, num_paths::Int)
-    """
+function create_hitting_times_Experiment(Exp::Experiment)
+    """ Creates a new Experiment object with the num_chains variable set to 1
+        and returns the original Experiment's num_chains as a separate variable.
+        This weirdness is to be compatible with the ``run_chain" method.
     """
     @unpack_Experiment Exp
-    @assert num_chains == 1
+    num_paths = num_chains
+    num_chains = 1
+
+    new_Exp = Experiment(X₀, N, num_chains, Dist, activation, step_size,
+                         num_steps, forward, store_steps)
+    new_Exp, num_paths
+end
+
+function hitting_times(Exp::Experiment)
+    """ Calculates the hitting time to 0 for each sample path and returns them
+        in an array.
+    """
+    Exp, num_chains = create_hitting_times_Experiment(Exp)
+    @assert Exp.num_chains == 1 # to be compatible with the run_chain method
 
     times = []
     num_exceeds = 0
 
-    for i=1:num_paths
+    for i=1:num_chains
         Results = ExperimentResults([], [], [])
         run_chain(Exp, Results, verbose=false)
 
@@ -290,7 +305,7 @@ function time_to_convergence_to_zero(Exp::Experiment, num_paths::Int)
         end
     end
 
-    println("$num_exceeds/$num_paths paths did not converge to 0 within $num_steps steps.")
+    println("$num_exceeds/$num_chains paths did not converge to 0 within $num_steps steps.")
     times
 end
 
