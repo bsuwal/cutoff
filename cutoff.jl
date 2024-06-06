@@ -247,7 +247,6 @@ end
 
 
 function run_chain(Exp::Experiment, Results::ExperimentResults; verbose::Bool=false)
-    # exp = Experiment(X₀, N, num_chains, Dist, activation, step_size, num_steps)
     """ Returns an Array of total variation distances between the distribution
         of X₀ and the point mass at 0.
     """
@@ -269,14 +268,21 @@ function run_chain(Exp::Experiment, Results::ExperimentResults; verbose::Bool=fa
     end
 end
 
-function time_to_convergence_to_zero(Exp::Experiment, num_paths)
-    @assert Exp.num_chains == 1
+function time_to_convergence_to_zero(Exp::Experiment, num_paths::Int)
+    """
+    """
+    @unpack_Experiment Exp
+    @assert num_chains == 1
+
     times = []
     num_exceeds = 0
 
     for i=1:num_paths
-        tvds = run_chain(Exp, verbose=false)
-        time = findfirst(==(0), tvds)
+        Results = ExperimentResults([], [], [])
+        run_chain(Exp, Results, verbose=false)
+
+        time = findfirst(==(0), Results.tvds)
+
         if isnothing(time)
             num_exceeds += 1
         else
@@ -284,7 +290,6 @@ function time_to_convergence_to_zero(Exp::Experiment, num_paths)
         end
     end
 
-    num_steps = Exp.num_steps
     println("$num_exceeds/$num_paths paths did not converge to 0 within $num_steps steps.")
     times
 end
@@ -294,37 +299,58 @@ end
 """
 
 function get_plotting_strs(Exp::Experiment)
-    diststr = ""
+    """
+    """
+    @unpack_Experiment Exp
+
+    diststr_greek = ""
+    diststr_nongreek = ""
     actstr = ""
+    dynamicsstr = ""
 
-    if typeof(Exp.Dist) == Normal{Float64}
-        μ = Exp.Dist.μ
-        std = Exp.Dist.σ
+    ### Distribution
+    if typeof(Dist) == Normal{Float64}
+        μ = Dist.μ
+        std = Dist.σ
+        std_greek = std
+        std_nongreek = std
 
-        if std == 1/√Exp.N
-            std = "1/√N"
+        if std == 1/√N
+            std_greek = "1/√N"
+            std_nongreek = "sqrtN"
         end
-        diststr = "Gaussian($μ, $std)"
-    elseif typeof(Exp.Dist) == Uniform{Float64}
-        a = Exp.Dist.a
-        b = Exp.Dist.b
 
-        if a == -1/√Exp.N
-            a = "-1/√N"
+        diststr_greek = "Gaussian($μ, $std_greek)"
+        diststr_nongreek = "Gaussian($μ, $std_nongreek)"
+
+    elseif typeof(Dist) == Uniform{Float64}
+        a = Dist.a
+        b = Dist.b
+
+        diststr_greek = "Uniform($a, $b)"
+        diststr_nongreek = "Uniform($a, $b)"
+
+        if a == -1/√N && b == 1/√N
+            diststr_greek = "Uniform(-1/√N, 1/√N)"
+            diststr_nongreek = "Uniform(-sqrtN, sqrtN)"
         end
-        if b == 1/√Exp.N
-            b = "1/√N"
-        end
-        diststr = "Uniform($a, $b)"
     end
 
-    if Exp.activation == σ
+    ### Activation
+    if activation == σ
         actstr = "ReLu"
-    elseif Exp.activation == tanh
+    elseif activation == tanh
         actstr = "TanH"
     end
 
-    return diststr, actstr
+    ### Forward vs Backward
+    if forward
+        dynamicsstr = "forward"
+    else
+        dynamicsstr = "backward"
+    end
+
+    return diststr_greek, diststr_nongreek, actstr, dynamicsstr
 end
 
 function run_and_plot_tvds(Exp::Experiment, Results::ExperimentResults; verbose=false, save=false)
@@ -333,11 +359,11 @@ function run_and_plot_tvds(Exp::Experiment, Results::ExperimentResults; verbose=
     @unpack_Experiment Exp
 
     run_chain(Exp, Results, verbose=verbose)
-    diststr, actstr = get_plotting_strs(Exp)
+    diststr_greek, diststr_nongreek, actstr, dynamicsstr = get_plotting_strs(Exp)
 
     p = plot()
     plot!(Results.tvds,
-         title="$diststr, $actstr, N=$N, $num_chains chains",
+         title="$diststr_greek, $actstr, N=$N, \n $dynamicsstr, $num_chains chains",
          xlabel="# layers",
          ylabel="tvd",
          xlim=(0, num_steps),
@@ -346,7 +372,7 @@ function run_and_plot_tvds(Exp::Experiment, Results::ExperimentResults; verbose=
          seriestype=:scatter
     )
     if save
-        savefig(p, "$diststr $actstr N=$N.png")
+        savefig(p, "$diststr_nongreek $actstr $dynamicsstr N=$N.png")
     else
         display(p)
     end
