@@ -18,7 +18,7 @@ using Random
     num_chains::Int
     Dist::Distribution
     activation::Function
-    step_size::Float64
+    grid_size::Float64
     num_steps::Int
     forward::Bool
     store_steps::Bool
@@ -48,85 +48,6 @@ function σ(x::Real)
     end
 end
 
-""" Distance functions
-"""
-
-function tvd(μ::Dict, ϕ::Dict)::Float64
-    """ Computes the total variation distance between the distributions μ and ϕ, where
-        μ and ϕ are dictionarys.
-    """
-    total_diff = 0
-
-    intersection = intersect(keys(μ), keys(ϕ))
-
-    for key in intersection
-        total_diff += abs(μ[key] - ϕ[key])
-    end
-
-    for key in setdiff(keys(μ), keys(ϕ))
-        total_diff += abs(μ[key])
-    end
-
-    for key in setdiff(keys(ϕ), keys(μ))
-        total_diff += abs(ϕ[key])
-    end
-
-    total_diff/2
-end
-
-""" Functions to compute the intervals in the hypergrid.
-"""
-
-function normalize!(d::Dict, denom)
-    """ Normalizes ``d" with the denominator ``denom".
-        Important: The function assumes that the values of ``d" are non-negative.
-    """
-    for (key, value) in d
-        d[key] = value/denom
-    end
-end
-
-function get_interval(point, step_size)
-    """ Gets the interval that ``point" is in on a hypergrid of size ``step_size".
-    """
-    intervals = Array{Interval, 1}()
-    for coord in point
-        interval = get_coordinate_interval(coord, step_size)
-        push!(intervals, interval)
-    end
-    Tuple(intervals)
-end
-
-function get_coordinate_interval(val, step_size, digits = 5)::Interval
-    """ Returns interval that ``val" is in on a hypergrid of size ``step_size".
-        Note: 0 is centered on [-step_size/2, step_size/2]. The rounding business in this
-              function is to allow for this centering.
-    """
-    @assert step_size >= 0.0001 "smallest step_size allowed is 0.0001 (change the `digits' param to allow for smaller step sizes.)"
-
-    if val >= 0
-        left = round(step_size/2 + floor((val - step_size/2)/step_size) * step_size, digits = digits)
-        right = round(left + step_size, digits = digits)
-    else
-        right = round(-step_size/2 + ceil((val + step_size/2)/step_size) * step_size, digits = digits)
-        left = round(right - step_size, digits = digits)
-    end
-
-    Interval(left, right)
-end
-
-function update_dist!(μ::Dict, X, step_size::Float64)
-    """ Adds 1 to the observation of state ``X" to the distribution
-        μ (which is a dictionary).
-    """
-    interval = get_interval(X, step_size)
-
-    if interval in keys(μ)
-        μ[interval] += 1
-    else
-        μ[interval] = 1
-    end
-end
 
 """ Markov Chain Functions
 """
@@ -134,7 +55,7 @@ end
 function take_forward_step!(Exp::Experiment, Results::ExperimentResults, X, ϕ)
     """ Takes a random step using the a linear map generated from ``Dist" for each
         Xᵢ in X. Returns the probability distribution of Xᵢ at this step on a hypergrid
-        of granularity ``step_size".
+        of granularity ``grid_size".
 
         Note: This function overwrites the array ``X" at each step, in true Markov
         Chain fashion, and forgets the previous steps. Similarly, we do not currently
@@ -142,7 +63,7 @@ function take_forward_step!(Exp::Experiment, Results::ExperimentResults, X, ϕ)
     """
     @unpack_Experiment Exp
 
-    μ = Dict{NTuple{N, Interval}, Float64}()
+    μ = Vector{Float64}()
     weights = Array{Matrix{Float64}, 1}()
     steps = Array{Array{Float64}, 1}()
 
@@ -159,7 +80,7 @@ function take_forward_step!(Exp::Experiment, Results::ExperimentResults, X, ϕ)
         end
 
         # update the distribution of Xᵢs observed at this time step
-        update_dist!(μ, X[i], step_size)
+        update_dist!(μ, X[i], grid_size)
     end
     # update Results
     normalize!(μ, num_chains)
@@ -201,13 +122,13 @@ function take_reverse_step!(Exp::Experiment, Results::ExperimentResults)
     push!(Results.steps, steps)
 end
 
-function get_distribution_at_step(X::Array, N::Int, num_chains::Int, step_size::Float64)
+function get_distribution_at_step(X::Array, N::Int, num_chains::Int, grid_size::Float64)
     """
     """
     μ = Dict{NTuple{N, Interval}, Float64}()
 
     for i=1:num_chains
-        update_dist!(μ, X[i], step_size)
+        update_dist!(μ, X[i], grid_size)
     end
 
     normalize!(μ, num_chains)
@@ -223,7 +144,7 @@ function take_reverse_step!(Exp::Experiment, Results::ExperimentResults, ϕ)
     take_reverse_step!(Exp, Results)
 
     X = last(Results.steps)
-    μ = get_distribution_at_step(X, N, num_chains, step_size)
+    μ = get_distribution_at_step(X, N, num_chains, grid_size)
     push!(Results.tvds, tvd(μ, ϕ))
 end
 
@@ -239,7 +160,7 @@ function initialize_chain_variables(Exp::Experiment)
         push!(X, X₀)
     end
 
-    zero_coords = get_interval(zeros(N), step_size)
+    zero_coords = get_interval(zeros(N), grid_size)
     ϕ = Dict{NTuple{N, Interval}, Float64}()
     ϕ[zero_coords] = 1
 
@@ -267,20 +188,6 @@ function run_chain(Exp::Experiment, Results::ExperimentResults; verbose::Bool=fa
             take_reverse_step!(Exp, Results, ϕ)
         end
     end
-end
-
-function create_hitting_times_Experiment(Exp::Experiment)
-    """ Creates a new Experiment object with the num_chains variable set to 1
-        and returns the original Experiment's num_chains as a separate variable.
-        This weirdness is to be compatible with the ``run_chain" method.
-    """
-    @unpack_Experiment Exp
-    num_paths = num_chains
-    num_chains = 1
-
-    new_Exp = Experiment(X₀, N, num_chains, Dist, activation, step_size,
-                         num_steps, forward, store_steps)
-    new_Exp, num_paths
 end
 
 
@@ -391,7 +298,7 @@ function run_and_plot_tvds(Exp::Experiment, Results::ExperimentResults; verbose=
 
     p = plot()
     plot!(Results.tvds,
-         title="$diststr_greek, $actstr, N=$N, \n $dynamicsstr, $num_chains chains, $step_size step size",
+         title="$diststr_greek, $actstr, N=$N, \n $dynamicsstr, $num_chains chains, $grid_size grid size",
          xlabel="# layers",
          ylabel="tvd",
          xlim=(0, num_steps),
