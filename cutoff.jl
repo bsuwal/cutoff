@@ -7,6 +7,7 @@ using Plots
 using Distributions
 using Parameters
 using LinearAlgebra
+using Random
 
 """ Experiment Struct that has all the information for an experiment
     Note: using the @with_kw macro lets us use the @unpack macro.
@@ -282,26 +283,32 @@ function create_hitting_times_Experiment(Exp::Experiment)
     new_Exp, num_paths
 end
 
+
 function hitting_times(Exp::Experiment)
     """ Calculates the hitting time to 0 for each sample path and returns them
         in an array.
     """
-    Exp, num_chains = create_hitting_times_Experiment(Exp)
-    @assert Exp.num_chains == 1 # to be compatible with the run_chain method
-
-    times = []
+    @unpack_Experiment Exp
+    times = Vector{Float64}()
+    W = rand(Dist, N, N)
     num_exceeds = 0
 
     for i=1:num_chains
-        Results = ExperimentResults([], [], [])
-        run_chain(Exp, Results, verbose=false)
+        X = X₀
+        no_hit = true
+        for t=1:num_steps
+            # take a step
+            rand!(Dist, W) # reuse the Weights matrix so we don't allocate new memory
+            X = activation.(W * X) # rewrite X
 
-        time = findfirst(==(0), Results.tvds)
-
-        if isnothing(time)
+            if iszero(X)
+                push!(times, t)
+                no_hit = false
+                break
+            end
+        end
+        if no_hit
             num_exceeds += 1
-        else
-            push!(times, time)
         end
     end
 
