@@ -97,12 +97,12 @@ function get_interval(point, step_size)
     Tuple(intervals)
 end
 
-function get_coordinate_interval(val, step_size, digits = 4)::Interval
+function get_coordinate_interval(val, step_size, digits = 5)::Interval
     """ Returns interval that ``val" is in on a hypergrid of size ``step_size".
         Note: 0 is centered on [-step_size/2, step_size/2]. The rounding business in this
               function is to allow for this centering.
     """
-    @assert step_size >= 0.001 "smallest step_size allowed is 0.001 (change the `digits' param to allow for smaller step sizes.)"
+    @assert step_size >= 0.0001 "smallest step_size allowed is 0.0001 (change the `digits' param to allow for smaller step sizes.)"
 
     if val >= 0
         left = round(step_size/2 + floor((val - step_size/2)/step_size) * step_size, digits = digits)
@@ -313,6 +313,12 @@ function hitting_times(Exp::Experiment)
     end
 
     println("$num_exceeds/$num_chains paths did not converge to 0 within $num_steps steps.")
+
+    # this statement is so that normalization takes num_exceeds into account. a negative value is
+    # used and the "hack" is to plot only from 0 and upwards, therefore covering the negative value's bar in the plot.
+    for i in 1:num_exceeds
+        push!(times, -10)
+    end
     times
 end
 
@@ -385,7 +391,7 @@ function run_and_plot_tvds(Exp::Experiment, Results::ExperimentResults; verbose=
 
     p = plot()
     plot!(Results.tvds,
-         title="$diststr_greek, $actstr, N=$N, \n $dynamicsstr, $num_chains chains",
+         title="$diststr_greek, $actstr, N=$N, \n $dynamicsstr, $num_chains chains, $step_size step size",
          xlabel="# layers",
          ylabel="tvd",
          xlim=(0, num_steps),
