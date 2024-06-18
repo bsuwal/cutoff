@@ -111,3 +111,31 @@ function plot_single_coordinate_over_time(Exp::Experiment, all_steps, coord)
         yticks = -1.2:0.2:1.2,
     )
 end
+
+function grid_size_effects(Exp::Experiment, grid_sizes)
+    """
+    """
+    @unpack_Experiment Exp
+    p = plot()
+
+    for grid_size in grid_sizes
+        println(grid_size)
+        CurrExp = Experiment(X₀, N, num_chains, Dist, activation, grid_size, num_steps, forward, store_steps)
+        Results = ExperimentResults([], [], [])
+
+        run_chain(CurrExp, Results, verbose=false)
+        diststr_greek, diststr_nongreek, actstr, dynamicsstr = get_plotting_strs(Exp)
+
+        plot!(Results.tvds,
+             title="$diststr_greek, $actstr, N=$N, \n $dynamicsstr, $num_chains chains",
+             xlabel="# layers",
+             ylabel="tvd",
+             xlim=(0, num_steps),
+             ylim=(-0.2, 1.2),
+             yticks = 0:0.2:1.2,
+             seriestype=:scatter,
+            label="$grid_size"
+        )
+    end
+    return p
+end
