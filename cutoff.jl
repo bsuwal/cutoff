@@ -176,6 +176,7 @@ function hitting_times(Exp::Experiment)
     times = Vector{Float64}()
     W = rand(Dist, N, N)
     num_exceeds = 0
+    zero_interval = get_interval(zeros(N), grid_size)
 
     for i=1:num_chains
         X = X₀
@@ -185,10 +186,18 @@ function hitting_times(Exp::Experiment)
             rand!(Dist, W) # reuse the Weights matrix so we don't allocate new memory
             X = activation.(W * X) # rewrite X
 
-            if iszero(X)
-                push!(times, t)
-                no_hit = false
-                break
+            if activation == σ
+                if iszero(X)
+                    push!(times, t)
+                    no_hit = false
+                    break
+                end
+            elseif activation == tanh
+                if zero_interval == get_interval(X, grid_size)
+                    push!(times, t)
+                    no_hit = false
+                    break
+                end
             end
         end
         if no_hit
