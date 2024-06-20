@@ -203,7 +203,7 @@ function run_chain(Exp::Experiment, Results::ExperimentResults; verbose::Bool=fa
             if Exp.activation == σ
                 take_forward_step_ReLu!(Exp, Results, X)
             elseif Exp.activation == tanh
-                take_forward_step_ReLu!(Exp, Results, X, ϕ)
+                take_forward_step_tanh!(Exp, Results, X, ϕ)
             end
         else
             take_reverse_step!(Exp, Results, ϕ)

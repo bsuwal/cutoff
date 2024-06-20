@@ -64,9 +64,15 @@ function run_and_plot_tvds(Exp::Experiment, Results::ExperimentResults; verbose=
     run_chain(Exp, Results, verbose=verbose)
     diststr_greek, diststr_nongreek, actstr, dynamicsstr = get_plotting_strs(Exp)
 
+    if activation == σ
+        title = "$diststr_greek, $actstr, N=$N, \n $dynamicsstr, $num_chains chains"
+    elseif activation == tanh
+        title = "$diststr_greek, $actstr, N=$N, \n $dynamicsstr, $num_chains chains, $grid_size grid size"
+    end
+
     p = plot()
     plot!(Results.tvds,
-         title="$diststr_greek, $actstr, N=$N, \n $dynamicsstr, $num_chains chains, $grid_size grid size",
+         title=title,
          xlabel="# layers",
          ylabel="tvd",
          xlim=(0, num_steps),
