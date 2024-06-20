@@ -28,8 +28,47 @@ end
 
 """ Markov Chain Functions
 """
+function take_forward_step_ReLu!(Exp::Experiment, Results::ExperimentResults, X)
+    """ Takes a random step using the a linear map generated from ``Dist" for each
+        Xᵢ in X. Returns the probability distribution of Xᵢ at this step on a hypergrid
+        of granularity ``grid_size".
 
-function take_forward_step!(Exp::Experiment, Results::ExperimentResults, X, ϕ)
+        Note: This function overwrites the array ``X" at each step, in true Markov
+        Chain fashion, and forgets the previous steps. Similarly, we do not currently
+        keep track of the μ distribtions of previous steps.
+    """
+    @unpack_Experiment Exp
+
+    weights = Array{Matrix{Float64}, 1}()
+    steps = Array{Array{Float64}, 1}()
+    num_hits = 0
+
+    for i=1:num_chains
+        # take a step for the i'th chain
+        Wᵢ = rand(Dist, N, N)
+        step = activation.(Wᵢ * X[i])
+        X[i] = step
+
+        if iszero(step)
+            num_hits += 1
+        end
+
+        if store_steps
+            push!(weights, Wᵢ)
+            push!(steps, step)
+        end
+    end
+
+    # num_hits/num_chains is the fraction that have hit 0. All the TVD comes from the fraction that did not hit 0.
+    push!(Results.tvds, (1 - num_hits/num_chains))
+
+    if store_steps
+        push!(Results.weights, weights)
+        push!(Results.steps, steps)
+    end
+end
+
+function take_forward_step_tanh!(Exp::Experiment, Results::ExperimentResults, X, ϕ)
     """ Takes a random step using the a linear map generated from ``Dist" for each
         Xᵢ in X. Returns the probability distribution of Xᵢ at this step on a hypergrid
         of granularity ``grid_size".
@@ -43,12 +82,12 @@ function take_forward_step!(Exp::Experiment, Results::ExperimentResults, X, ϕ)
     μ = Dict{NTuple{N, Interval}, Float64}()
     weights = Array{Matrix{Float64}, 1}()
     steps = Array{Array{Float64}, 1}()
+    num_hits = 0
 
     for i=1:num_chains
         # take a step for the i'th chain
         Wᵢ = rand(Dist, N, N)
         step = activation.(Wᵢ * X[i])
-
         X[i] = step
 
         if store_steps
@@ -62,6 +101,7 @@ function take_forward_step!(Exp::Experiment, Results::ExperimentResults, X, ϕ)
     # update Results
     normalize!(μ, num_chains)
     push!(Results.tvds, tvd(μ, ϕ))
+
     if store_steps
         push!(Results.weights, weights)
         push!(Results.steps, steps)
@@ -160,7 +200,11 @@ function run_chain(Exp::Experiment, Results::ExperimentResults; verbose::Bool=fa
         end
 
         if forward
-            take_forward_step!(Exp, Results, X, ϕ)
+            if Exp.activation == σ
+                take_forward_step_ReLu!(Exp, Results, X)
+            elseif Exp.activation == tanh
+                take_forward_step_ReLu!(Exp, Results, X, ϕ)
+            end
         else
             take_reverse_step!(Exp, Results, ϕ)
         end
@@ -180,7 +224,7 @@ function hitting_times(Exp::Experiment)
 
     for i=1:num_chains
         X = X₀
-        no_hit = true
+        hit = false
         for t=1:num_steps
             # take a step
             rand!(Dist, W) # reuse the Weights matrix so we don't allocate new memory
@@ -188,19 +232,19 @@ function hitting_times(Exp::Experiment)
 
             if activation == σ
                 if iszero(X)
+                    hit = true
                     push!(times, t)
-                    no_hit = false
                     break
                 end
             elseif activation == tanh
                 if zero_interval == get_interval(X, grid_size)
+                    hit = true
                     push!(times, t)
-                    no_hit = false
                     break
                 end
             end
         end
-        if no_hit
+        if hit == false
             num_exceeds += 1
         end
     end

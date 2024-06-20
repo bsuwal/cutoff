@@ -52,7 +52,7 @@ function get_coordinate_interval(val, grid_size, digits = 8)::Interval
         Note: 0 is centered on [-grid_size/2, grid_size/2]. The rounding business in this
               function is to allow for this centering.
     """
-    @assert grid_size >= 0.000000001 "smallest grid_size allowed is 0.0001 (change the `digits' param to allow for smaller grid sizes.)"
+    @assert grid_size >= 0.000000001 "smallest grid_size allowed is 0.000000001 (change the `digits' param to allow for smaller grid sizes.)"
 
     if val >= 0
         left = round(grid_size/2 + floor((val - grid_size/2)/grid_size) * grid_size, digits = digits)
