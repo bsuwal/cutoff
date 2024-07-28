@@ -24,6 +24,35 @@ function tvd(μ::Dict, ϕ::Dict)::Float64
     total_diff/2
 end
 
+function tvd(μ::Array, ϕ::Array)
+    """ Computes the total variation distance between the distributions μ and ϕ.
+    """
+    @assert size(μ) == size(ϕ)
+    total_diff = 0
+
+    for i in eachindex(μ)
+        total_diff += abs(μ[i] - ϕ[i])
+    end
+
+    total_diff/2
+end
+
+function tₘᵢₓ(tvds::Vector{Float64}, α::Float64)
+    """ Returns the α-mixing time of a Markov Chain with associated
+        total variation distance array ``tvds".
+    """
+    @assert 0 < α < 1
+
+    for (i, tvd) in enumerate(tvds)
+        if tvd < α
+            return i
+        end
+    end
+
+    error("tvds array has no entry below α.")
+end
+
+
 """ Functions to compute the intervals in the hypergrid.
 """
 
@@ -47,12 +76,12 @@ function get_interval(point, grid_size)
     Tuple(intervals)
 end
 
-function get_coordinate_interval(val, grid_size, digits = 8)::Interval
+function get_coordinate_interval(val, grid_size, digits = 10)::Interval
     """ Returns interval that ``val" is in on a hypergrid of size ``grid_size".
         Note: 0 is centered on [-grid_size/2, grid_size/2]. The rounding business in this
               function is to allow for this centering.
     """
-    @assert grid_size >= 0.000000001 "smallest grid_size allowed is 0.000000001 (change the `digits' param to allow for smaller grid sizes.)"
+    @assert grid_size >= 1/(10^10) "smallest grid_size allowed is 1.0e-10 (change the `digits' param to allow for smaller grid sizes.)"
 
     if val >= 0
         left = round(grid_size/2 + floor((val - grid_size/2)/grid_size) * grid_size, digits = digits)

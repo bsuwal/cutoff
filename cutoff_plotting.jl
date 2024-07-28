@@ -81,7 +81,7 @@ function run_and_plot_tvds(Exp::Experiment, Results::ExperimentResults; verbose=
          seriestype=:scatter
     )
     if save
-        savefig(p, "$diststr_nongreek $actstr $dynamicsstr N=$N.png")
+        savefig(p, "imgs/tvds/$diststr_nongreek $actstr $dynamicsstr N=$N.png")
     else
         display(p)
     end
