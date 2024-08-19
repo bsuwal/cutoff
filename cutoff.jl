@@ -9,6 +9,7 @@ using Parameters
 using LinearAlgebra
 using Random
 
+include("misc.jl")
 include("structs.jl")
 include("tvd.jl")
 include("cutoff_plotting.jl")
@@ -45,7 +46,7 @@ function take_forward_step_ReLu!(Exp::Experiment, Results::ExperimentResults, X)
 
     for i=1:num_chains
         # take a step for the i'th chain
-        Wᵢ = rand(Dist, N, N)
+        Wᵢ = rand(WeightDist, N, N)
         step = activation.(Wᵢ * X[i])
         X[i] = step
 
@@ -86,7 +87,7 @@ function take_forward_step_tanh!(Exp::Experiment, Results::ExperimentResults, X,
 
     for i=1:num_chains
         # take a step for the i'th chain
-        Wᵢ = rand(Dist, N, N)
+        Wᵢ = rand(WeightDist, N, N)
         step = activation.(Wᵢ * X[i])
         X[i] = step
 
@@ -115,7 +116,7 @@ function sample_weights!(Exp::Experiment, Results::ExperimentResults)
     weights = Array{Matrix{Float64}, 1}()
 
     for i=1:num_chains
-        Wᵢ = rand(Dist, N, N)
+        Wᵢ = rand(WeightDist, N, N)
         push!(weights, Wᵢ)
     end
 
@@ -218,16 +219,16 @@ function hitting_times(Exp::Experiment)
     """
     @unpack_Experiment Exp
     times = Vector{Float64}()
-    W = rand(Dist, N, N)
+    W = rand(WeightDist, N, N)
     num_exceeds = 0
     zero_interval = get_interval(zeros(N), grid_size)
 
     for i=1:num_chains
-        X = X₀
+        X = rand(X₀_Dist, N)
         hit = false
         for t=1:num_steps
             # take a step
-            rand!(Dist, W) # reuse the Weights matrix so we don't allocate new memory
+            rand!(WeightDist, W) # reuse the Weights matrix so we don't allocate new memory
             X = activation.(W * X) # rewrite X
 
             if activation == σ
@@ -257,4 +258,12 @@ function hitting_times(Exp::Experiment)
         push!(times, -10)
     end
     times
+end
+
+function hitting_time_pr(t::Int, eps::Float64)
+    """ Returns the analytic computation of Pr[T=1] for the case of N=1 for
+        the Uniform+TanH case.
+        The scalars W and X are both sampled from U[-1, -1].
+    """
+    (1/factorial(t)) * (-1)^t * atanh(eps) * ln(atanh(eps))^t
 end

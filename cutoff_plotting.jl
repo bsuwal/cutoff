@@ -12,9 +12,9 @@ function get_plotting_strs(Exp::Experiment)
     dynamicsstr = ""
 
     ### Distribution
-    if typeof(Dist) == Normal{Float64}
-        μ = Dist.μ
-        std = Dist.σ
+    if typeof(WeightDist) == Normal{Float64}
+        μ = WeightDist.μ
+        std = WeightDist.σ
         std_greek = std
         std_nongreek = std
 
@@ -26,9 +26,9 @@ function get_plotting_strs(Exp::Experiment)
         diststr_greek = "Gaussian($μ, $std_greek)"
         diststr_nongreek = "Gaussian($μ, $std_nongreek)"
 
-    elseif typeof(Dist) == Uniform{Float64}
-        a = Dist.a
-        b = Dist.b
+    elseif typeof(WeightDist) == Uniform{Float64}
+        a = WeightDist.a
+        b = WeightDist.b
 
         diststr_greek = "Uniform($a, $b)"
         diststr_nongreek = "Uniform($a, $b)"

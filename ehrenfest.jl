@@ -34,13 +34,13 @@ function stationary_distribution(P::Matrix{Float64}, sigdigits::Int=4)
     """
     is_approx_arrays(a, b, precision) = round.(a, sigdigits=precision) == round.(b, sigdigits=precision)
 
-    prev = zeros(size(P)[1])     # initialize vector (any vector that sums up to 1 will do)
+    prev = zeros(size(P)[1])'     # initialize vector (any vector that sums up to 1 will do)
     prev[1] = 1
 
     while true
-        curr = P' * prev
+        curr = prev * P
         if is_approx_arrays(curr, prev, sigdigits)
-            return curr
+            return curr'
         end
         prev = curr
     end

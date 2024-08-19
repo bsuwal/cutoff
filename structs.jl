@@ -2,10 +2,10 @@
     Note: using the @with_kw macro lets us use the @unpack macro.
 """
 @with_kw struct Experiment
-    X₀::Vector{Float64}
+    InitialDist::Distribution
     N::Int
     num_chains::Int
-    Dist::Distribution
+    WeightDist::Distribution
     activation::Function
     grid_size::Float64
     num_steps::Int
