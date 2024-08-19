@@ -2,7 +2,7 @@
 """
 
 function get_plotting_strs(Exp::Experiment)
-    """
+    """ Returns the strings needed for the plotting functions based on the Experiment.
     """
     @unpack_Experiment Exp
 
@@ -54,6 +54,19 @@ function get_plotting_strs(Exp::Experiment)
     end
 
     return diststr_greek, diststr_nongreek, actstr, dynamicsstr
+end
+
+function println_hist(hist)
+    """ Prints the probability of hitting time at time t. Assumes that the histogram starts at t=-1 and
+        skips printing that.
+    """
+    for (idx, w) in enumerate(hist.weights)
+        if idx == 1
+            continue
+        else
+            println("Pr[T=" * string(idx-2) * "]: ", w)
+        end
+    end
 end
 
 function run_and_plot_tvds(Exp::Experiment, Results::ExperimentResults; verbose=false, save=false)

@@ -214,8 +214,12 @@ end
 
 
 function hitting_times(Exp::Experiment)
-    """ Calculates the hitting time to 0 for each sample path and returns them
-        in an array.
+    """ Returns the tuple (times, hist) where:
+
+        times : Array{Int} is the hitting time to 0 for each sample path. If the
+                sample path does not hit 0 within Exp.num_steps then that time is
+                listed as -1.
+        hist  : The normalized histogram of Pr[T=t] based on the above "times" array.
     """
     @unpack_Experiment Exp
     times = Vector{Float64}()
@@ -255,15 +259,31 @@ function hitting_times(Exp::Experiment)
     # this statement is so that normalization takes num_exceeds into account. a negative value is
     # used and the "hack" is to plot only from 0 and upwards, therefore covering the negative value's bar in the plot.
     for i in 1:num_exceeds
-        push!(times, -10)
+        push!(times, -1)
     end
-    times
+
+    bins = -1:1:num_steps+1
+    hist = normalize(fit(Histogram, times, bins), mode=:probability)
+
+    times, hist
 end
 
-function hitting_time_pr(t::Int, eps::Float64)
+function hitting_time_pr(N::Int, t::Int, eps::Float64)
     """ Returns the analytic computation of Pr[T=1] for the case of N=1 for
         the Uniform+TanH case.
         The scalars W and X are both sampled from U[-1, -1].
+
+        Currently works only for the N=1 case. Throws an error if N ≂̸ 1.
     """
-    (1/factorial(t)) * (-1)^t * atanh(eps) * ln(atanh(eps))^t
+    if N != 1
+        throw("Hitting times can only be computed in the closed form for N=1, recieved N=$N.")
+    end
+
+    if t == 1
+        return atanh(eps) * (1 - ln(atanh(eps)))
+    elseif t >= 2
+        (1/factorial(t)) * (-1)^t * atanh(eps) * ln(atanh(eps))^t
+    else
+        throw("t needs to be greater than 1, received t=$t.")
+    end
 end
