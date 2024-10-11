@@ -173,7 +173,7 @@ function initialize_chain_variables(Exp::Experiment)
 
     # the first step for every chain is the same.
     X = Array{Vector{Float64}, 1}()
-    Xᵢ = X₀
+    X₀ = rand(X₀_Dist, N)
     for i = 1:Exp.num_chains
         push!(X, X₀)
     end
@@ -282,7 +282,7 @@ function hitting_time_pr(N::Int, t::Int, eps::Float64)
     if t == 1
         return atanh(eps) * (1 - ln(atanh(eps)))
     elseif t >= 2
-        (1/factorial(t)) * (-1)^t * atanh(eps) * ln(atanh(eps))^t
+        (1/factorial(t)) * atanh(eps) * (-ln(atanh(eps)))^t
     else
         throw("t needs to be greater than 1, received t=$t.")
     end
